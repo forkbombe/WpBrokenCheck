@@ -3,6 +3,7 @@ import csv
 import sys
 import bs4
 import httpx
+import validators
 
 domain = sys.argv[1]
 csv_file = sys.argv[2]
@@ -44,16 +45,20 @@ def getLinks(rendered_content):
     return [(link["href"], link.text) for link in soup("a") if "href" in link.attrs]
     
 async def getStatusCode(client, link, headers, timeout=5):
-    print("    checking: ", link[0])
-    try:
-        r = await client.head(link[0], headers=headers, timeout=timeout)
-        if r.status_code in {404, 400, 403}:
-            r = await client.get(link[0], headers=headers, timeout=timeout)
-    except httpx.RequestError as errh:
-        print("Error in URL, ", link)
-        return link, errh.__class__.__name__
+    if validators.url(link[0]) and link[0].startswith("https"):
+        print("    checking: ", link[0])
+        try:
+            r = await client.head(link[0], headers=headers, timeout=timeout)
+            if r.status_code in {404, 400, 403}:
+                r = await client.get(link[0], headers=headers, timeout=timeout)
+        except httpx.RequestError as errh:
+            print("Error in URL, ", link)
+            return link, errh.__class__.__name__
+        else:
+            return link, str(r.status_code)
     else:
-        return link, str(r.status_code)
+        print("Error in URL, ", link)
+        return link, str("Invalid URL")
 
 async def executeBrokenLinkCheck(client, links):
     results = []
@@ -63,7 +68,7 @@ async def executeBrokenLinkCheck(client, links):
     return results
 
 async def main():
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=False) as client:
         pages = int(
             (await client.get("https://" + domain + "/wp-json/wp/v2/posts", headers=headers)).headers[
                 "X-WP-TotalPages"
